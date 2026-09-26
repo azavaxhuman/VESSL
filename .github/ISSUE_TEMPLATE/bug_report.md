@@ -1,31 +1,39 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: Something in VESSL does not work as expected
 title: ''
 labels: bug
-assignees: erfjab
+assignees: azavaxhuman
 
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**What happened**
+A clear description of the problem.
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+**What you expected**
+What should have happened instead.
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+**How to reproduce**
+The menu option you used, or the full command, for example:
+`vessl you@example.com example.com marzban`
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**Environment**
+- VESSL version (`vessl --version`):
+- OS and version (for example Ubuntu 24.04):
+- Panel, if any (Marzban, 3X-UI, ...):
+- Certificate type: single / multi-domain / wildcard (Cloudflare or manual DNS)
 
-**System (please complete the following information):**
- - OS: [e.g. iOS]
- - Version [e.g. 22]
+**Check output**
+Paste the output of `vessl --check <your-domain>`:
 
-**Additional context**
-Add any other context about the problem here.
+```
+```
+
+**Log**
+Paste the relevant part of `/var/log/vessl.log`. Remove any tokens, keys or emails you do not want to share.
+
+```
+```
+
+**Anything else**
+Screenshots or other details that might help.
