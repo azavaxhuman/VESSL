@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="2.0.0"
+VERSION="2.0.1"
 APP_TAGLINE="Very Easy SSL"
 REPO_URL="https://github.com/azavaxhuman/VESSL"
 RAW_URL="https://raw.githubusercontent.com/azavaxhuman/VESSL/main/vessl.sh"
@@ -19,6 +19,7 @@ CF_TOKEN_PAGE="https://dash.cloudflare.com/profile/api-tokens"
 PANELS=(marzban marzneshin pasarguard rebecca x-ui 3x-ui s-ui hiddify ovpanel)
 SPIN=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 TXT_WAIT_SECONDS=600
+MENU_NOTICE=""
 
 email=""
 destination=""
@@ -236,11 +237,15 @@ kill_tree() {
 }
 
 on_interrupt() {
-    [ -n "$TASK_PID" ] && kill_tree "$TASK_PID"
-    TASK_PID=""
     show_cursor
     printf '\n'
-    error "Interrupted"
+    if [ -n "$TASK_PID" ]; then
+        kill_tree "$TASK_PID"
+        TASK_PID=""
+        error "Interrupted"
+    else
+        printf '  %s\n\n' "${gray}Bye.${reset}"
+    fi
     exit 130
 }
 
@@ -2331,11 +2336,51 @@ menu_item() {
     printf '  %s  %s%s\n' "$(col "${cyan}${bold}$1${reset}" 5)" "$(col "$2" 28)" "${gray}$3${reset}"
 }
 
+installed_version() {
+    [ -f "$INSTALL_PATH" ] || return 1
+    grep -m1 '^VERSION=' "$INSTALL_PATH" 2>/dev/null | cut -d'"' -f2
+}
+
+_download_self() {
+    curl -fsSL --max-time 30 -o "$1" "$RAW_URL" && bash -n "$1"
+}
+
+ensure_installed() {
+    local have self tmp
+    self=$(readlink -f "$0" 2>/dev/null)
+    [ "$self" = "$INSTALL_PATH" ] && return 0
+    have=$(installed_version)
+    if [ -n "$have" ] && ! version_gt "$VERSION" "$have"; then
+        return 0
+    fi
+    tmp=$(mktemp)
+    if [ -f "$self" ] && grep -q '^VERSION=' "$self" 2>/dev/null; then
+        cp "$self" "$tmp"
+    elif [[ "${BASH_EXECUTION_STRING:-}" == *'VERSION="'* ]]; then
+        printf '%s\n' "$BASH_EXECUTION_STRING" > "$tmp"
+    elif ! run_task -q "Installing the vessl command" _download_self "$tmp"; then
+        rm -f "$tmp"
+        MENU_NOTICE="${orange}⚠${reset} Could not install the ${bold}vessl${reset} command. Install it with: ${bold}curl -fsSL $RAW_URL -o $INSTALL_PATH && chmod +x $INSTALL_PATH${reset}"
+        return 1
+    fi
+    if bash -n "$tmp" 2>/dev/null && install -m 755 "$tmp" "$INSTALL_PATH"; then
+        if [ -n "$have" ]; then
+            MENU_NOTICE="${green}✓${reset} The ${bold}vessl${reset} command was updated from v$have to v$VERSION"
+        else
+            MENU_NOTICE="${green}✓${reset} VESSL is installed. Next time just type ${bold}vessl${reset}"
+        fi
+    else
+        MENU_NOTICE="${orange}⚠${reset} Could not write $INSTALL_PATH"
+    fi
+    rm -f "$tmp"
+}
+
 run_menu() {
     local c
     require_root
     load_config
     printf '\n'
+    ensure_installed
     detect_ips
     while true; do
         restore_services
@@ -2353,6 +2398,10 @@ run_menu() {
         clear_screen
         banner
         status_box
+        if [ -n "$MENU_NOTICE" ]; then
+            printf '\n  %s\n' "$MENU_NOTICE"
+            MENU_NOTICE=""
+        fi
         printf '\n'
         menu_item "[1]" "Issue certificate" "one or more domains, HTTP"
         menu_item "[2]" "Issue wildcard certificate" "*.domain, DNS"

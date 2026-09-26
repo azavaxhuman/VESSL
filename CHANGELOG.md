@@ -2,6 +2,13 @@
 
 All notable changes to VESSL are listed here.
 
+## [2.0.1] - 2026-09-26
+
+### Fixed
+
+- Running VESSL with the one-line `bash -c "$(curl ...)"` command opened the menu but did not install the `vessl` command. Opening the menu now installs `/usr/local/bin/vessl`, or updates it when the installed copy is older, and says so under the status box.
+- Pressing Ctrl+C at a menu prompt now exits with "Bye." instead of an "Interrupted" error. The error is kept for when a running task is interrupted.
+
 ## [2.0.0] - 2026-09-25
 
 A complete rewrite. The script is now `vessl.sh` and installs as the `vessl` command.

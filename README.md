@@ -4,7 +4,7 @@
 
 **Very Easy SSL** — free Let's Encrypt certificates for your server and panels, from one friendly menu.
 
-[![Version](https://img.shields.io/badge/version-2.0.0-2ea44f)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.0.1-2ea44f)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 [![Shell](https://img.shields.io/badge/shell-bash-4EAA25)](vessl.sh)
 
@@ -19,7 +19,7 @@ VESSL is a fork of [ESSL by erfjab](https://github.com/erfjab/ESSL).
   ╚██╗ ██╔╝██╔══╝  ╚════██║╚════██║██║
    ╚████╔╝ ███████╗███████║███████║███████╗
     ╚═══╝  ╚══════╝╚══════╝╚══════╝╚══════╝
-  Very Easy SSL  v2.0.0
+  Very Easy SSL  v2.0.1
   forked from ESSL by erfjab
 
   ╭─ Server ─────────────────────────────────────────────────────────────────╮
@@ -101,19 +101,26 @@ On other distributions, install these tools yourself first, then run VESSL.
 
 ## Installation
 
-Install VESSL as the `vessl` command:
+Run this as root:
 
 ```bash
-sudo curl -fsSL https://raw.githubusercontent.com/azavaxhuman/VESSL/main/vessl.sh -o /usr/local/bin/vessl
-sudo chmod +x /usr/local/bin/vessl
-sudo vessl
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/azavaxhuman/VESSL/main/vessl.sh)"
 ```
 
-Or run it once without installing:
+The menu opens, and VESSL also installs itself as the `vessl` command, so next time you just type:
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/azavaxhuman/VESSL/main/vessl.sh)"
+vessl
 ```
+
+If you prefer to install the file yourself:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/azavaxhuman/VESSL/main/vessl.sh -o /usr/local/bin/vessl
+chmod +x /usr/local/bin/vessl
+```
+
+If you are not logged in as root, put `sudo` in front of these commands.
 
 To update, use menu option **9**, or run:
 
@@ -125,7 +132,7 @@ sudo vessl --update
 
 1. Point your domain's **A record** (and its AAAA record, if you have one) to the server's IP address.
    If the domain is on Cloudflare, set the record to **DNS only** (grey cloud).
-2. Run `sudo vessl`.
+2. Run the installation command above, or `vessl` if VESSL is already installed.
 3. Choose **1** to issue a certificate, then enter your email, your domain and where the certificate should be saved.
 4. Point your panel to the two files VESSL prints at the end:
 
