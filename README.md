@@ -4,7 +4,7 @@
 
 **Very Easy SSL** — free Let's Encrypt certificates for your server and panels, from one friendly menu.
 
-[![Version](https://img.shields.io/badge/version-2.0.2-2ea44f)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.1.0-2ea44f)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 [![Shell](https://img.shields.io/badge/shell-bash-4EAA25)](vessl.sh)
 [![GitHub stars](https://img.shields.io/github/stars/azavaxhuman/VESSL?style=flat&logo=github&label=stars&color=f5c518)](https://github.com/azavaxhuman/VESSL/stargazers)
@@ -23,7 +23,7 @@ VESSL is a fork of [ESSL by erfjab](https://github.com/erfjab/ESSL).
   ╚██╗ ██╔╝██╔══╝  ╚════██║╚════██║██║
    ╚████╔╝ ███████╗███████║███████║███████╗
     ╚═══╝  ╚══════╝╚══════╝╚══════╝╚══════╝
-  Very Easy SSL  v2.0.2
+  Very Easy SSL  v2.1.0
   forked from ESSL by erfjab
 
   ╭─ Server ─────────────────────────────────────────────────────────────────╮
@@ -97,7 +97,7 @@ Found a bug or have an idea? [Open an issue](https://github.com/azavaxhuman/VESS
 - **Preflight checks.** VESSL checks the Let's Encrypt API, your DNS records, CAA records, nameservers, port 80, the firewall and your Cloudflare credentials before it asks for a certificate.
 - **Free staging test.** A test certificate from Let's Encrypt's staging server tells you whether the real request will succeed. It does not use up your rate limit.
 - **Port inspector.** Shows every listening TCP port with the process, systemd service or Docker container behind it.
-- **Automatic port 80 handling.** If a service or container holds port 80, VESSL can stop it for a few seconds and start it again. It sets up the same stop and start for every automatic renewal.
+- **Port 80 is never left to chance.** When port 80 is busy, VESSL offers safe choices: stop the owner for a few seconds, keep it running with webroot or a forwarded local port, or validate on port 443. It shows the exact config lines and a reload command that tests the config first, and it checks the setup before asking Let's Encrypt.
 - **Two engines.** acme.sh is used first and certbot is the fallback. Certificates use ECDSA P-256 keys.
 - **Ready-made panel paths** for Marzban, Marzneshin, PasarGuard, Rebecca, X-UI, 3X-UI, S-UI, Hiddify and OV-Panel, plus any custom folder.
 - **Certificate overview.** Lists every certificate with a lifetime bar, the expiry date, whether it is a wildcard and how it renews.
@@ -201,7 +201,7 @@ Issuing runs these steps, and each one shows a progress bar:
 
 1. **Preparing dependencies.** Installs any missing tools.
 2. **Preflight checks.** See [Checking a domain before issuing](#checking-a-domain-before-issuing).
-3. **Freeing port 80.** See [Port 80 and running services](#port-80-and-running-services).
+3. **Port 80.** If it is busy, you choose how to handle it. See [Port 80 and running services](#port-80-and-running-services).
 4. **Staging test**, only if you asked for one with `--test` or answered yes in the menu.
 5. **Requesting certificate.** acme.sh is tried first and certbot is used if acme.sh fails.
 6. **Finishing up.** Restarts anything that was stopped, records the certificate and shows a summary.
@@ -355,7 +355,9 @@ Wildcard issuing runs its own checks: the Let's Encrypt API, the domain's namese
 
 ## Port 80 and running services
 
-HTTP validation needs port 80 for a few seconds. Menu option **4** (or `vessl --ports`) shows who is using each port:
+Let's Encrypt checks HTTP validation by connecting to **port 80** of your server from the internet. That port is fixed by the ACME standard and cannot be changed. What you *can* choose is **who answers it**, and VESSL never leaves that to chance.
+
+Menu option **4** (or `vessl --ports`) shows who is using each port:
 
 ```
   PORT    ADDRESS                    PROCESS            PID       OWNER
@@ -365,11 +367,81 @@ HTTP validation needs port 80 for a few seconds. Menu option **4** (or `vessl --
   8000    127.0.0.1                  python3            1402      -
 ```
 
-When port 80 is busy during issuing:
+When port 80 is busy, the same screen lists your options and the exact commands for your server.
 
-- If a **systemd service** or a **Docker container** holds it, VESSL asks whether it may stop that service. It stops it, gets the certificate, and starts it again, even if something fails along the way or you press Ctrl+C.
-- The same stop and start is registered as a pre-hook and post-hook, so **automatic renewals free port 80 the same way**.
-- If some other process holds the port, VESSL shows it and asks you to stop it yourself.
+### Your options when port 80 is busy
+
+When you issue a certificate and port 80 is in use, VESSL stops and asks:
+
+```
+  ╭─ Port 80 is busy. How should VESSL continue? ─────────────────────────╮
+  │ Let's Encrypt always checks port 80 of this server from the internet. │
+  │ That port cannot be changed, but you choose who answers it.           │
+  ╰───────────────────────────────────────────────────────────────────────╯
+
+  [1]    Stop it for a few seconds      service:nginx.service, started again right after
+  [2]    Keep it running: webroot       no downtime, a few lines in its config
+  [3]    Keep it running: other port    it forwards the challenge to VESSL
+  [4]    Validate on port 443           TLS-ALPN, 443 is free right now
+  [5]    Show me the commands           do it by hand, nothing is changed
+  [0]    Cancel
+```
+
+Only the options that can work on your server are shown.
+
+| Option | Downtime | What happens | Command line |
+|---|---|---|---|
+| **Stop it for a few seconds** | a few seconds | The systemd service or Docker container is stopped, the certificate is issued, and it is started again, even if something fails or you press Ctrl+C. The same stop and start is registered for every automatic renewal. | *(default with `-y`)* |
+| **Webroot** | none | Your web server serves the challenge files from a folder (default `/var/www/vessl`). | `--webroot [dir]` |
+| **Another local port** | none | Your web server forwards `/.well-known/acme-challenge/` to VESSL on a local port (default `8880`). | `--httpport <port>` |
+| **TLS-ALPN on 443** | none | Validation uses port 443 instead of 80. Only offered when 443 is free. acme.sh only. | `--alpn` |
+| **DNS validation** | none | No ports at all. Menu option 2. | `--wildcard` |
+| **Show me the commands** | your call | VESSL changes nothing and prints the commands to do it by hand. | |
+
+For the webroot and local-port options, VESSL:
+
+1. Detects the web server on port 80 (nginx, Apache or Caddy) and finds the config file that names your domain.
+2. Shows the exact lines to add, for example for nginx:
+
+   ```nginx
+   location ^~ /.well-known/acme-challenge/ {
+       root /var/www/vessl;
+       default_type "text/plain";
+   }
+   ```
+
+   or, for the local-port option:
+
+   ```nginx
+   location ^~ /.well-known/acme-challenge/ {
+       proxy_pass http://127.0.0.1:8880;
+       proxy_set_header Host $host;
+   }
+   ```
+
+3. Shows a safe reload command that tests the config before loading it, so a typo never takes the server down:
+
+   ```bash
+   nginx -t && systemctl reload nginx
+   apache2ctl configtest && systemctl reload apache2
+   caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+   ```
+
+4. **Tests it before asking Let's Encrypt.** VESSL puts a test file in place, fetches it through your web server, and only continues when it comes back correctly. A mistake costs nothing, and it does not count against your rate limit.
+
+Leave these lines in your web server config. Automatic renewals use them too.
+
+### Freeing port 80 by hand
+
+If port 80 is held by a program that is not a systemd service or a Docker container, VESSL does not kill it. It shows commands like these instead:
+
+```bash
+ps -o pid,user,cmd -p 812
+kill 812
+ss -ltnp 'sport = :80'
+```
+
+The first command shows what the program is. `kill` without `-9` sends SIGTERM, which asks the program to shut down cleanly. The last command checks that port 80 is free. Use `kill -9` only if the program is still running after a few seconds, and start it again afterwards the same way it was started before.
 
 ## Renewal
 
@@ -443,6 +515,9 @@ vessl --install | --update | --uninstall | --help | --version
 | Option | Description |
 |---|---|
 | `--test` | Run a staging test before the real request (HTTP only) |
+| `--webroot [dir]` | Your web server serves the challenge files from `dir` (default `/var/www/vessl`) |
+| `--httpport <port>` | Your web server forwards the challenge to VESSL on this local port |
+| `--alpn` | Validate with TLS-ALPN on port 443 instead of port 80 |
 | `--skip-check` | Skip the preflight checks |
 | `--force` | Renew even if the current certificate is still valid |
 | `--verbose` | Show the raw acme.sh and certbot output instead of spinners |
@@ -465,6 +540,8 @@ If you give none of these, VESSL looks for the `CF_Token` environment variable, 
 vessl --check example.com
 vessl you@example.com example.com marzban
 vessl you@example.com example.com www.example.com /root/certs --test
+vessl you@example.com example.com marzban --webroot /var/www/vessl
+vessl you@example.com example.com marzban --httpport 8880
 vessl you@example.com sub.example.com 3x-ui -y
 vessl --wildcard you@example.com example.com marzban --cf-token XXXX
 vessl --wildcard you@example.com example.com /root/certs --manual
@@ -526,7 +603,8 @@ When a request fails, VESSL shows the last lines of the tool's output with a lik
 | `… does not match this server` | The A or AAAA record points to another IP, or Cloudflare's proxy is on | Fix the record and turn the orange cloud off. A wrong **AAAA** record is a common cause, because Let's Encrypt prefers IPv6 |
 | `Another server answered on port 80` | The domain points to a CDN or to another server | Point the domain directly to this server |
 | `Let's Encrypt could not reach port 80` | The provider's firewall or security group blocks port 80 | Open inbound TCP 80 in the provider's panel and in `ufw` or `firewalld` |
-| `Port 80 is held by a process that is not a systemd service or a docker container` | Something was started by hand | Find it with `vessl --ports`, stop it, and try again |
+| `Port 80 is busy and VESSL cannot free it on its own` | A program that is not a systemd service or a Docker container holds port 80, and VESSL ran with `-y` or without a terminal | Follow the commands VESSL prints, or add `--webroot`, `--httpport` or `--alpn` |
+| `The web server did not return the test file` | The webroot or forwarding lines are missing, in the wrong server block, or the web server was not reloaded | Check the config file VESSL points to, run the safe reload command, and try again |
 | `CAA record … does not allow Let's Encrypt` | A CAA record allows only another certificate authority | Add `0 issue "letsencrypt.org"`, plus `0 issuewild "letsencrypt.org"` for wildcards |
 | `Rate limit reached` | Too many failed or duplicate requests | Wait, and use `--check` or `--test` while you experiment, because staging requests don't count |
 | `Cloudflare rejected the API token` | Wrong token or missing permissions | Create a token with **Zone → DNS → Edit** and **Zone → Zone → Read** |

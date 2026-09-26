@@ -2,6 +2,25 @@
 
 All notable changes to VESSL are listed here.
 
+## [2.1.0] - 2026-09-26
+
+### Added
+
+- When port 80 is busy, VESSL asks how to continue instead of only offering to stop the owner:
+  - stop the systemd service or Docker container for a few seconds, as before,
+  - **webroot** (`--webroot [dir]`): the running web server serves the challenge files, no downtime,
+  - **another local port** (`--httpport <port>`): the web server forwards the challenge to VESSL, no downtime,
+  - **TLS-ALPN on port 443** (`--alpn`), offered when 443 is free,
+  - **show the commands** to do it by hand, changing nothing.
+- nginx, Apache and Caddy are detected, the config file that names the domain is located, and the exact lines to add are shown with a safe test-then-reload command.
+- Self-test before contacting Let's Encrypt: a test file is fetched through the web server, so a wrong config never costs a request.
+- `vessl --ports` explains the options and prints owner-specific commands when port 80 is busy: `systemctl stop/start`, `docker stop/start`, or `kill` with SIGTERM for unmanaged processes.
+- The certificate list shows the renewal method for webroot, forwarded port and TLS-ALPN certificates, and Renew reuses the same method.
+
+### Changed
+
+- With `-y` or without a terminal, a busy port 80 held by an unmanaged process now stops with clear instructions instead of a generic error.
+
 ## [2.0.2] - 2026-09-26
 
 ### Added

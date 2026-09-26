@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="2.0.2"
+VERSION="2.1.0"
 APP_TAGLINE="Very Easy SSL"
 REPO_URL="https://github.com/azavaxhuman/VESSL"
 RAW_URL="https://raw.githubusercontent.com/azavaxhuman/VESSL/main/vessl.sh"
@@ -54,6 +54,14 @@ PREFLIGHT_ERRORS=0
 PREFLIGHT_WARNINGS=0
 PORT80_STATE=""
 PORT_OWNERS=()
+PORT_PROCS=()
+PORT_PIDS=()
+HTTP_MODE=""
+MODE_PRESET=0
+WEBROOT_DIR="/var/www/vessl"
+ALT_PORT="8880"
+MODE_ACME=()
+MODE_CERTBOT=()
 STOPPED_SERVICES=()
 STOPPED_CONTAINERS=()
 HOOKS=()
@@ -562,7 +570,7 @@ reg_save() {
     touch "$REGISTRY_FILE"
     tmp=$(mktemp)
     awk -F'|' -v d="$3" '$3 != d' "$REGISTRY_FILE" > "$tmp"
-    printf '%s|%s|%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" "$5" "$6" >> "$tmp"
+    printf '%s|%s|%s|%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "${7:-}" >> "$tmp"
     mv "$tmp" "$REGISTRY_FILE"
 }
 
@@ -729,6 +737,8 @@ owner_label() {
 check_port() {
     local port=$1 mode=$2 lines addr proc pid label
     PORT_OWNERS=()
+    PORT_PROCS=()
+    PORT_PIDS=()
     if ! have_socket_tool; then
         warn "Neither ss nor netstat is available, cannot check port $port"
         return 2
@@ -747,8 +757,120 @@ check_port() {
         label=$(owner_label "$proc" "$pid" "$port")
         hint "$addr → $proc (pid $pid) [$label]"
         PORT_OWNERS+=("$label")
+        PORT_PROCS+=("$proc")
+        PORT_PIDS+=("$pid")
     done <<< "$lines"
     return 1
+}
+
+unique_owners() {
+    printf '%s\n' "${PORT_OWNERS[@]}" | awk 'NF && !seen[$0]++'
+}
+
+owners_stoppable() {
+    local label
+    [ ${#PORT_OWNERS[@]} -gt 0 ] || return 1
+    for label in "${PORT_OWNERS[@]}"; do
+        [[ "$label" == service:* || "$label" == container:* ]] || return 1
+    done
+    return 0
+}
+
+web_server_kind() {
+    local p label
+    for label in "${PORT_OWNERS[@]}"; do
+        [[ "$label" == container:* ]] && {
+            echo "docker"
+            return
+        }
+    done
+    for p in "${PORT_PROCS[@]}"; do
+        case "$p" in
+            nginx*) echo "nginx"; return ;;
+            apache2|httpd) echo "apache"; return ;;
+            caddy) echo "caddy"; return ;;
+            docker-proxy) echo "docker"; return ;;
+        esac
+    done
+    echo "other"
+}
+
+port_free() {
+    [ -z "$(port_users "$1")" ]
+}
+
+vessl_cmd_hint() {
+    if [ -n "$email" ] && [ ${#DOMAINS[@]} -gt 0 ] && [ -n "$DEST_TARGET" ]; then
+        printf 'vessl %s %s %s' "$email" "${DOMAINS[*]}" "$DEST_TARGET"
+    else
+        printf 'vessl <email> <domain> <destination>'
+    fi
+}
+
+code() {
+    printf '      %s\n' "${cyan}$1${reset}"
+}
+
+print_port80_commands() {
+    local i label cmd seen="|"
+    cmd=$(vessl_cmd_hint)
+    printf '\n'
+    box_top "Free port 80 by hand"
+    box_row "${gray}Stop the owner, issue the certificate, then start it again.${reset}"
+    box_bottom
+    for i in "${!PORT_OWNERS[@]}"; do
+        label=${PORT_OWNERS[$i]}
+        [[ "$seen" == *"|$label${PORT_PIDS[$i]}|"* ]] && continue
+        seen+="$label${PORT_PIDS[$i]}|"
+        case "$label" in
+            service:*)
+                printf '\n  %s\n' "${bold}${PORT_PROCS[$i]}${reset} ${gray}is the systemd service ${label#service:}${reset}"
+                code "systemctl stop ${label#service:}"
+                code "$cmd"
+                code "systemctl start ${label#service:}"
+                ;;
+            container:*)
+                printf '\n  %s\n' "${bold}${PORT_PROCS[$i]}${reset} ${gray}belongs to the Docker container ${label#container:}${reset}"
+                code "docker stop ${label#container:}"
+                code "$cmd"
+                code "docker start ${label#container:}"
+                ;;
+            *)
+                printf '\n  %s\n' "${bold}${PORT_PROCS[$i]}${reset} ${gray}(pid ${PORT_PIDS[$i]}) is not managed by systemd or Docker${reset}"
+                code "ps -o pid,user,cmd -p ${PORT_PIDS[$i]}"
+                code "kill ${PORT_PIDS[$i]}"
+                hint "kill without -9 sends SIGTERM, which asks the program to shut down cleanly."
+                hint "Use kill -9 only if it is still running after a few seconds."
+                hint "Start it again afterwards the same way it was started before."
+                ;;
+        esac
+    done
+    printf '\n  %s\n' "${bold}Check that port 80 is free${reset}"
+    code "ss -ltnp 'sport = :80'"
+    printf '\n  %s\n' "${bold}Or keep it running and use another way to validate${reset}"
+    code "$cmd --webroot /var/www/vessl"
+    hint "your web server serves the challenge files, no downtime"
+    code "$cmd --httpport 8880"
+    hint "your web server forwards the challenge to VESSL on port 8880"
+    code "$cmd --alpn"
+    hint "validates on port 443 instead, which must be free"
+    code "vessl --wildcard <email> <domain> <destination>"
+    hint "DNS validation, needs no ports at all"
+}
+
+show_port80_options() {
+    printf '\n'
+    box_top "Port 80 is busy. Your options"
+    box_row "${gray}Let's Encrypt always checks port 80 here (443 with TLS-ALPN).${reset}"
+    box_row "${gray}That port cannot be changed, but you choose who answers it:${reset}"
+    box_row ""
+    box_row "$(col "${bold}Stop it briefly${reset}" 22)${gray}VESSL stops the owner for a few seconds${reset}"
+    box_row "$(col "${bold}Webroot${reset}" 22)${gray}your web server serves the files, no downtime${reset}"
+    box_row "$(col "${bold}Another local port${reset}" 22)${gray}your web server forwards to VESSL${reset}"
+    box_row "$(col "${bold}TLS-ALPN on 443${reset}" 22)${gray}when port 443 is free${reset}"
+    box_row "$(col "${bold}DNS validation${reset}" 22)${gray}menu option 2, needs no ports${reset}"
+    box_bottom
+    hint "VESSL asks which one to use when you issue a certificate."
 }
 
 show_ports() {
@@ -772,43 +894,22 @@ show_ports() {
         if [ "$port" = "80" ] || [ "$port" = "443" ]; then c=$orange; fi
         printf '  %s%-7s%s %-26s %-18s %-9s %s\n' "$c$bold" "$port" "$reset$c" "$addr" "$proc" "$pid" "${gray}$label${reset}"
     done <<< "$lines"
-    printf '\n'
-    if [ -n "$(port_users 80)" ]; then
-        hint "Port 80 is needed for HTTP validation. VESSL can stop its owner for a few seconds while issuing."
-        hint "Wildcard certificates use DNS validation and do not need port 80."
-    fi
     [ "$EUID" -eq 0 ] || warn "Run as root to see process names and owners"
+    if ! port_free 80; then
+        printf '\n'
+        check_port 80 >/dev/null
+        show_port80_options
+        print_port80_commands
+    fi
 }
 
-free_port() {
-    local port=$1 label owners=()
-    if [ -z "$PORT80_STATE" ]; then
-        check_port "$port"
-        case $? in
-            0) PORT80_STATE="free" ;;
-            1) PORT80_STATE="busy" ;;
-            *) PORT80_STATE="unknown" ;;
-        esac
-    elif [ "$PORT80_STATE" = "free" ]; then
-        success "Port $port is free"
-    fi
-    [ "$PORT80_STATE" = "busy" ] || return 0
-
-    mapfile -t owners < <(printf '%s\n' "${PORT_OWNERS[@]}" | sort -u)
-    for label in "${owners[@]}"; do
-        if [[ "$label" != service:* && "$label" != container:* ]]; then
-            error "Port $port is held by a process that is not a systemd service or a docker container."
-            hint "Stop it manually and try again. Run 'vessl --ports' to see it."
-            return 1
-        fi
-    done
-
-    hint "Whatever runs on port $port will be down for a few seconds."
+stop_port80_owners() {
+    local label owners=()
+    mapfile -t owners < <(unique_owners)
+    hint "Whatever runs on port 80 will be down for a few seconds."
     if ! confirm "Stop ${owners[*]} temporarily and start it again afterwards?"; then
-        error "Port $port must be free for HTTP validation."
         return 1
     fi
-
     for label in "${owners[@]}"; do
         case "$label" in
             service:*)
@@ -831,14 +932,397 @@ free_port() {
                 ;;
         esac
     done
-
     sleep 2
-    if check_port "$port"; then
+    if check_port 80; then
         PORT80_STATE="free"
+        HTTP_MODE="stop"
         return 0
     fi
-    error "Port $port is still in use."
+    error "Port 80 is still in use."
     return 1
+}
+
+server_reload_cmd() {
+    case "$1" in
+        nginx) echo "nginx -t && systemctl reload nginx" ;;
+        apache)
+            if command -v apache2ctl &>/dev/null; then
+                echo "apache2ctl configtest && systemctl reload apache2"
+            else
+                echo "apachectl configtest && systemctl reload httpd"
+            fi
+            ;;
+        caddy) echo "caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy" ;;
+    esac
+}
+
+server_conf_hint() {
+    local kind=$1 d=${DOMAINS[0]} re files=""
+    re=$(sed 's/[.]/[.]/g' <<< "$d")
+    case "$kind" in
+        nginx) files=$(grep -rlsE "^[^#]*server_name[^;]*[[:space:]]$re([[:space:];]|$)" /etc/nginx 2>/dev/null) ;;
+        apache) files=$(grep -rlsiE "^[^#]*Server(Name|Alias)[^#]*[[:space:]]$re([[:space:]]|$)" /etc/apache2 /etc/httpd 2>/dev/null) ;;
+        caddy) files=$(grep -lsE "^[^#]*$re" /etc/caddy/Caddyfile 2>/dev/null) ;;
+    esac
+    files=$(while IFS= read -r f; do [ -n "$f" ] && readlink -f "$f"; done <<< "$files" | sort -u | head -n3)
+    if [ -n "$files" ]; then
+        hint "$d is configured in:"
+        while IFS= read -r f; do hint "  $f"; done <<< "$files"
+    else
+        case "$kind" in
+            nginx) hint "No server block names $d yet. Use the one that listens on port 80, often /etc/nginx/sites-enabled/default." ;;
+            apache) hint "No VirtualHost names $d yet. Use the one on port 80, often /etc/apache2/sites-enabled/000-default.conf." ;;
+            caddy) hint "No site in /etc/caddy/Caddyfile names $d yet. Add it to the site block for http://$d." ;;
+        esac
+    fi
+}
+
+show_server_snippet() {
+    local mode=$1 kind=$2 d=${DOMAINS[0]} reload
+    printf '\n'
+    case "$kind" in
+        nginx)
+            log "Add this inside the ${bold}server { }${reset} block that listens on port 80 for ${bold}$d${reset}:"
+            server_conf_hint nginx
+            printf '\n'
+            code "location ^~ /.well-known/acme-challenge/ {"
+            if [ "$mode" = "webroot" ]; then
+                code "    root $WEBROOT_DIR;"
+                code "    default_type \"text/plain\";"
+            else
+                code "    proxy_pass http://127.0.0.1:$ALT_PORT;"
+                code "    proxy_set_header Host \$host;"
+            fi
+            code "}"
+            ;;
+        apache)
+            log "Add this inside the ${bold}<VirtualHost *:80>${reset} block for ${bold}$d${reset}:"
+            server_conf_hint apache
+            printf '\n'
+            if [ "$mode" = "webroot" ]; then
+                code "Alias /.well-known/acme-challenge/ $WEBROOT_DIR/.well-known/acme-challenge/"
+                code "<Directory \"$WEBROOT_DIR/.well-known/acme-challenge/\">"
+                code "    Require all granted"
+                code "</Directory>"
+            else
+                code "ProxyPass /.well-known/acme-challenge/ http://127.0.0.1:$ALT_PORT/.well-known/acme-challenge/"
+                hint "This needs mod_proxy: a2enmod proxy proxy_http"
+            fi
+            ;;
+        caddy)
+            log "Add this inside the site block for ${bold}http://$d${reset} in /etc/caddy/Caddyfile:"
+            server_conf_hint caddy
+            printf '\n'
+            code "handle /.well-known/acme-challenge/* {"
+            if [ "$mode" = "webroot" ]; then
+                code "    root * $WEBROOT_DIR"
+                code "    file_server"
+            else
+                code "    reverse_proxy 127.0.0.1:$ALT_PORT"
+            fi
+            code "}"
+            ;;
+        docker)
+            warn "Port 80 belongs to a Docker container."
+            if [ "$mode" = "webroot" ]; then
+                hint "The web server inside it must see $WEBROOT_DIR, so the folder has to be mounted into the container."
+            else
+                hint "The web server inside it must reach this server on port $ALT_PORT, usually at 172.17.0.1:$ALT_PORT."
+            fi
+            hint "If that is not set up already, stopping the container for a few seconds is the easier choice."
+            ;;
+        *)
+            log "Configure the program on port 80 so that for ${bold}$d${reset}:"
+            if [ "$mode" = "webroot" ]; then
+                code "http://$d/.well-known/acme-challenge/<file>"
+                hint "serves the files from $WEBROOT_DIR/.well-known/acme-challenge/"
+            else
+                code "http://$d/.well-known/acme-challenge/*"
+                hint "is forwarded to http://127.0.0.1:$ALT_PORT"
+            fi
+            ;;
+    esac
+    reload=$(server_reload_cmd "$kind")
+    if [ -n "$reload" ]; then
+        printf '\n'
+        log "Then test and reload. The server keeps running, and a broken config is never loaded:"
+        code "$reload"
+    fi
+    printf '\n'
+    hint "Keep this in the config. Automatic renewals use it too."
+}
+
+_serve_token() {
+    local port=$1 token=$2 script
+    script=$(mktemp)
+    cat > "$script" <<EOF
+#!/bin/bash
+while IFS= read -r l; do l=\${l%\$'\r'}; [ -z "\$l" ] && break; done
+printf 'HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${#token}\r\n\r\n%s' '$token'
+EOF
+    chmod 700 "$script"
+    timeout 20 socat "TCP-LISTEN:$port,reuseaddr,fork" "EXEC:$script" >/dev/null 2>&1 &
+    echo "$! $script"
+}
+
+_http_self_test() {
+    local mode=$1 d=${DOMAINS[0]} token body ip srv="" file=""
+    token="vessl-test-$RANDOM$RANDOM"
+    if [ "$mode" = "webroot" ]; then
+        mkdir -p "$WEBROOT_DIR/.well-known/acme-challenge" || return 1
+        file="$WEBROOT_DIR/.well-known/acme-challenge/$token"
+        printf '%s' "$token" > "$file"
+        chmod 644 "$file"
+    else
+        command -v socat &>/dev/null || return 1
+        srv=$(_serve_token "$ALT_PORT" "$token")
+        sleep 1
+    fi
+    for ip in 127.0.0.1 ${SERVER_IPV4:+"$SERVER_IPV4"}; do
+        body=$(curl -s --max-time 8 --resolve "$d:80:$ip" "http://$d/.well-known/acme-challenge/$token" 2>/dev/null)
+        [ "$body" = "$token" ] && break
+    done
+    [ -n "$file" ] && rm -f "$file"
+    if [ -n "$srv" ]; then
+        kill "${srv%% *}" 2>/dev/null
+        rm -f "${srv#* }"
+    fi
+    echo "response: ${body:0:120}"
+    [ "$body" = "$token" ]
+}
+
+run_http_self_test() {
+    local what
+    if [ "$HTTP_MODE" = "webroot" ]; then
+        what="Checking that the web server serves $WEBROOT_DIR"
+    else
+        what="Checking that the web server forwards to port $ALT_PORT"
+    fi
+    if run_task "$what" _http_self_test "$HTTP_MODE"; then
+        success "The challenge path works, Let's Encrypt will reach it"
+        return 0
+    fi
+    warn "The web server did not return the test file for http://${DOMAINS[0]}/.well-known/acme-challenge/"
+    hint "Check the snippet above, reload the web server, and try again."
+    confirm "Continue anyway?"
+}
+
+setup_webroot() {
+    local kind=$1 d
+    HTTP_MODE="webroot"
+    if [ "$MODE_PRESET" -eq 0 ] && [ -t 0 ]; then
+        printf '\n'
+        hint "VESSL puts the challenge files in this folder, and your web server serves them."
+        d=$(ask "Webroot folder" "$WEBROOT_DIR") || return 1
+        [ "$d" = "0" ] && return 1
+        is_custom_path "$d" || {
+            error "The folder must be an absolute path"
+            return 1
+        }
+        WEBROOT_DIR=$(norm_path "$d")
+    fi
+    mkdir -p "$WEBROOT_DIR/.well-known/acme-challenge" || {
+        error "Could not create $WEBROOT_DIR"
+        return 1
+    }
+    if [ "$MODE_PRESET" -eq 0 ]; then
+        show_server_snippet webroot "$kind"
+        if [ -t 0 ]; then
+            read -r -p "  ${cyan}❯${reset} Press Enter after the web server is reloaded " _ || return 1
+        fi
+    fi
+    run_http_self_test
+}
+
+setup_altport() {
+    local kind=$1 p
+    HTTP_MODE="httpport"
+    if [ "$MODE_PRESET" -eq 0 ] && [ -t 0 ]; then
+        printf '\n'
+        hint "VESSL listens on this local port for a few seconds, and your web server forwards the challenge to it."
+        while true; do
+            p=$(ask "Local port" "$ALT_PORT") || return 1
+            [ "$p" = "0" ] && return 1
+            if [[ ! "$p" =~ ^[0-9]+$ ]] || ((p < 1024 || p > 65535)); then
+                warn "Use a port between 1024 and 65535"
+                continue
+            fi
+            if ! port_free "$p"; then
+                warn "Port $p is already in use, pick another one"
+                continue
+            fi
+            ALT_PORT=$p
+            break
+        done
+    elif ! port_free "$ALT_PORT"; then
+        error "Port $ALT_PORT is already in use"
+        return 1
+    fi
+    command -v socat &>/dev/null || {
+        error "socat is needed for this option"
+        return 1
+    }
+    if [ "$MODE_PRESET" -eq 0 ]; then
+        show_server_snippet httpport "$kind"
+        if [ -t 0 ]; then
+            read -r -p "  ${cyan}❯${reset} Press Enter after the web server is reloaded " _ || return 1
+        fi
+    fi
+    run_http_self_test
+}
+
+setup_alpn() {
+    HTTP_MODE="alpn"
+    if ! port_free 443; then
+        error "Port 443 is in use by $(port_users 443), TLS-ALPN needs it free"
+        return 1
+    fi
+    if [ ! -x "$ACME" ] || ! command -v socat &>/dev/null; then
+        error "TLS-ALPN needs acme.sh and socat"
+        return 1
+    fi
+    success "Port 443 is free, validation will use TLS-ALPN on 443"
+    hint "Port 443 must also be open in the firewall and free again at every renewal."
+}
+
+pick_port80_option() {
+    local opts=() i c kind owners
+    kind=$(web_server_kind)
+    owners=$(unique_owners | tr '\n' ' ')
+    owners_stoppable && opts+=(stop)
+    opts+=(webroot httpport)
+    port_free 443 && [ -x "$ACME" ] && opts+=(alpn)
+    opts+=(manual)
+
+    printf '\n'
+    box_top "Port 80 is busy. How should VESSL continue?"
+    box_row "${gray}Let's Encrypt always checks port 80 of this server from the internet.${reset}"
+    box_row "${gray}That port cannot be changed, but you choose who answers it.${reset}"
+    box_bottom
+    printf '\n'
+    for i in "${!opts[@]}"; do
+        case "${opts[$i]}" in
+            stop) printf '  %s  %s%s\n' "$(col "${cyan}${bold}[$((i + 1))]${reset}" 5)" "$(col "Stop it for a few seconds" 30)" "${gray}${owners% }, started again right after${reset}" ;;
+            webroot) printf '  %s  %s%s\n' "$(col "${cyan}${bold}[$((i + 1))]${reset}" 5)" "$(col "Keep it running: webroot" 30)" "${gray}no downtime, a few lines in its config${reset}" ;;
+            httpport) printf '  %s  %s%s\n' "$(col "${cyan}${bold}[$((i + 1))]${reset}" 5)" "$(col "Keep it running: other port" 30)" "${gray}it forwards the challenge to VESSL${reset}" ;;
+            alpn) printf '  %s  %s%s\n' "$(col "${cyan}${bold}[$((i + 1))]${reset}" 5)" "$(col "Validate on port 443" 30)" "${gray}TLS-ALPN, 443 is free right now${reset}" ;;
+            manual) printf '  %s  %s%s\n' "$(col "${cyan}${bold}[$((i + 1))]${reset}" 5)" "$(col "Show me the commands" 30)" "${gray}do it by hand, nothing is changed${reset}" ;;
+        esac
+    done
+    printf '  %s  %s\n\n' "$(col "${cyan}${bold}[0]${reset}" 5)" "Cancel"
+    hint "No ports at all: cancel and use menu option 2 (DNS validation)."
+    printf '\n'
+    while true; do
+        c=$(ask "Select" "1") || return 1
+        case "$c" in
+            0|q) return 1 ;;
+            ''|*[!0-9]*) warn "Enter a number from the list" ;;
+            *)
+                c=$((10#$c))
+                if ((c >= 1 && c <= ${#opts[@]})); then
+                    break
+                fi
+                warn "Enter a number from the list"
+                ;;
+        esac
+    done
+    case "${opts[$((c - 1))]}" in
+        stop) stop_port80_owners ;;
+        webroot) setup_webroot "$kind" ;;
+        httpport) setup_altport "$kind" ;;
+        alpn) setup_alpn ;;
+        manual)
+            print_port80_commands
+            return 1
+            ;;
+    esac
+}
+
+prepare_http_validation() {
+    local kind
+    case "$HTTP_MODE" in
+        webroot|httpport)
+            [ -n "$PORT80_STATE" ] || check_port 80 >/dev/null
+            kind=$(web_server_kind)
+            if [ "$HTTP_MODE" = "webroot" ]; then setup_webroot "$kind"; else setup_altport "$kind"; fi
+            return
+            ;;
+        alpn)
+            setup_alpn
+            return
+            ;;
+    esac
+    if [ -z "$PORT80_STATE" ]; then
+        check_port 80
+        case $? in
+            0) PORT80_STATE="free" ;;
+            1) PORT80_STATE="busy" ;;
+            *) PORT80_STATE="unknown" ;;
+        esac
+    elif [ "$PORT80_STATE" = "free" ]; then
+        success "Port 80 is free"
+    fi
+    if [ "$PORT80_STATE" != "busy" ]; then
+        HTTP_MODE="standalone"
+        return 0
+    fi
+    [ ${#PORT_OWNERS[@]} -gt 0 ] || check_port 80 >/dev/null
+    if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then
+        if owners_stoppable; then
+            stop_port80_owners && return 0
+        fi
+        error "Port 80 is busy and VESSL cannot free it on its own."
+        print_port80_commands
+        return 1
+    fi
+    pick_port80_option
+}
+
+set_mode_args() {
+    case "$HTTP_MODE" in
+        webroot)
+            MODE_ACME=(--webroot "$WEBROOT_DIR")
+            MODE_CERTBOT=(--webroot -w "$WEBROOT_DIR")
+            ;;
+        httpport)
+            MODE_ACME=(--standalone --httpport "$ALT_PORT")
+            MODE_CERTBOT=(--standalone --http-01-port "$ALT_PORT")
+            ;;
+        alpn)
+            MODE_ACME=(--alpn --tlsport 443)
+            MODE_CERTBOT=()
+            ;;
+        *)
+            MODE_ACME=(--standalone)
+            MODE_CERTBOT=(--standalone)
+            ;;
+    esac
+}
+
+http_method() {
+    case "$HTTP_MODE" in
+        webroot) echo "http_webroot" ;;
+        httpport) echo "http_port" ;;
+        alpn) echo "tls_alpn" ;;
+        *) echo "http" ;;
+    esac
+}
+
+http_param() {
+    case "$HTTP_MODE" in
+        webroot) echo "$WEBROOT_DIR" ;;
+        httpport) echo "$ALT_PORT" ;;
+    esac
+}
+
+http_mode_title() {
+    case "$HTTP_MODE" in
+        webroot) echo "HTTP, webroot $WEBROOT_DIR" ;;
+        httpport) echo "HTTP, forwarded to local port $ALT_PORT" ;;
+        alpn) echo "TLS-ALPN on port 443" ;;
+        stop) echo "HTTP on port 80, owner stopped briefly" ;;
+        *) echo "HTTP on port 80" ;;
+    esac
 }
 
 build_hooks() {
@@ -1015,7 +1499,7 @@ preflight() {
         0) PORT80_STATE="free" ;;
         1)
             PORT80_STATE="busy"
-            hint "HTTP validation needs port 80 free."
+            hint "The next step offers safe ways to handle this, nothing is stopped without asking."
             ;;
         *) PORT80_STATE="unknown" ;;
     esac
@@ -1179,12 +1663,13 @@ staging_test() {
     local args=() d tmp rc
     for d in "$@"; do args+=(-d "$d"); done
     tmp=$(mktemp -d)
-    if [ -x "$ACME" ] && command -v socat &>/dev/null; then
-        run_task "Test certificate from Let's Encrypt staging" "$ACME" --issue --standalone "${args[@]}" \
+    set_mode_args
+    if [ -x "$ACME" ] && { [ "$HTTP_MODE" = "webroot" ] || command -v socat &>/dev/null; }; then
+        run_task "Test certificate from Let's Encrypt staging" "$ACME" --issue "${MODE_ACME[@]}" "${args[@]}" \
             --server letsencrypt_test --config-home "$tmp" ${email:+--accountemail "$email"}
         rc=$?
-    elif command -v certbot &>/dev/null; then
-        run_task "Test certificate from Let's Encrypt staging" certbot certonly --standalone --dry-run "${args[@]}" \
+    elif command -v certbot &>/dev/null && [ ${#MODE_CERTBOT[@]} -gt 0 ]; then
+        run_task "Test certificate from Let's Encrypt staging" certbot certonly "${MODE_CERTBOT[@]}" --dry-run "${args[@]}" \
             --non-interactive --agree-tos --register-unsafely-without-email \
             --config-dir "$tmp/cfg" --work-dir "$tmp/work" --logs-dir "$tmp/logs"
         rc=$?
@@ -1245,14 +1730,15 @@ issue_with_acme() {
         warn "acme.sh is not installed"
         return 1
     }
-    command -v socat &>/dev/null || {
-        warn "socat is missing, acme.sh standalone mode needs it"
+    if [ "$HTTP_MODE" != "webroot" ] && ! command -v socat &>/dev/null; then
+        warn "socat is missing, acme.sh needs it for this validation mode"
         return 1
-    }
+    fi
+    set_mode_args
     for d in "${DOMAINS[@]}"; do args+=(-d "$d"); done
     [ "$FORCE" -eq 1 ] && extra+=(--force)
 
-    run_task "Requesting certificate via acme.sh" _acme_issue --issue --standalone "${args[@]}" \
+    run_task "Requesting certificate via acme.sh" _acme_issue --issue "${MODE_ACME[@]}" "${args[@]}" \
         --server letsencrypt --keylength ec-256 --accountemail "$email" "${HOOKS[@]}" "${extra[@]}" || return 1
     if grep -q VESSL_SKIPPED "$LAST_OUTPUT"; then
         log "The current certificate is still valid and was kept. Use Renew or --force to replace it."
@@ -1266,6 +1752,11 @@ issue_with_certbot() {
         warn "certbot is not installed"
         return 1
     }
+    set_mode_args
+    if [ ${#MODE_CERTBOT[@]} -eq 0 ]; then
+        warn "certbot does not support TLS-ALPN validation"
+        return 1
+    fi
     for d in "${DOMAINS[@]}"; do args+=(-d "$d"); done
     [ "$FORCE" -eq 1 ] && extra+=(--force-renewal)
     live="/etc/letsencrypt/live/$main"
@@ -1274,7 +1765,7 @@ issue_with_certbot() {
         return 1
     }
 
-    run_task "Requesting certificate via certbot" certbot certonly --standalone "${args[@]}" \
+    run_task "Requesting certificate via certbot" certbot certonly "${MODE_CERTBOT[@]}" "${args[@]}" \
         --cert-name "$main" --non-interactive --agree-tos --email "$email" \
         --deploy-hook "cp -L '$live/privkey.pem' '${destination}privkey.pem' && cp -L '$live/fullchain.pem' '${destination}fullchain.pem'" \
         "${HOOKS[@]}" "${extra[@]}" || return 1
@@ -1395,6 +1886,9 @@ days_text() {
 renew_text() {
     case "$1" in
         http) printf '%s' "auto-renew · HTTP" ;;
+        http_webroot) printf '%s' "auto-renew · webroot" ;;
+        http_port) printf '%s' "auto-renew · forwarded port" ;;
+        tls_alpn) printf '%s' "auto-renew · TLS-ALPN 443" ;;
         dns_cf) printf '%s' "auto-renew · Cloudflare DNS" ;;
         dns_manual) printf '%s' "${orange}manual renew · DNS TXT${reset}" ;;
     esac
@@ -1477,7 +1971,7 @@ show_plan() {
     if [ "$WILDCARD" -eq 1 ]; then
         box_kv "Validation" "$(dns_method_title "$DNS_METHOD")"
     else
-        box_kv "Validation" "HTTP on port 80"
+        box_kv "Validation" "$(http_mode_title)"
     fi
     box_kv "Save to" "$destination"
     box_kv "Files" "privkey.pem · fullchain.pem"
@@ -1505,6 +1999,9 @@ show_result() {
     case "$method" in
         dns_cf) box_kv "Renewal" "automatic, acme.sh cron + Cloudflare API" ;;
         dns_manual) box_row "$(col "${gray}Renewal${reset}" 13)${orange}manual, renew with VESSL before $(date -d "+60 days" +%F)${reset}" ;;
+        http_webroot) box_kv "Renewal" "automatic via $ENGINE, keep the webroot config" ;;
+        http_port) box_kv "Renewal" "automatic via $ENGINE, keep the forward to $ALT_PORT" ;;
+        tls_alpn) box_kv "Renewal" "automatic via acme.sh, port 443 must be free then" ;;
         *)
             if [ "$ENGINE" = "acme.sh" ]; then
                 box_kv "Renewal" "automatic, acme.sh cron job"
@@ -1563,8 +2060,12 @@ do_issue() {
         fi
     fi
 
-    step "Freeing port 80"
-    free_port 80 || return 1
+    step "Port 80"
+    if ! prepare_http_validation; then
+        restore_services
+        return 1
+    fi
+    set_mode_args
     build_hooks
 
     if [ "$RUN_TEST" -eq 1 ]; then
@@ -1593,10 +2094,10 @@ do_issue() {
     step "Finishing up"
     [ ${#HOOKS[@]} -gt 0 ] && stopped="${STOPPED_SERVICES[*]} ${STOPPED_CONTAINERS[*]}"
     restore_services
-    reg_save "${DOMAINS[0]}" "$(IFS=,; echo "${DOMAINS[*]}")" "$destination" "$email" "$ENGINE" "http"
+    reg_save "${DOMAINS[0]}" "$(IFS=,; echo "${DOMAINS[*]}")" "$destination" "$email" "$ENGINE" "$(http_method)" "$(http_param)"
     success "Saved to the VESSL certificate list"
     steps_done "Certificate issued"
-    show_result "$stopped" "http"
+    show_result "$stopped" "$(http_method)"
     printf '\n'
     support_box
     return 0
@@ -1701,7 +2202,7 @@ do_issue_dns() {
     acme_install_files || return 1
 
     step "Finishing up"
-    reg_save "$base" "$(IFS=,; echo "${DOMAINS[*]}")" "$destination" "$email" "$ENGINE" "$method"
+    reg_save "$base" "$(IFS=,; echo "${DOMAINS[*]}")" "$destination" "$email" "$ENGINE" "$method" ""
     success "Saved to the VESSL certificate list"
     steps_done "Wildcard certificate issued"
     show_result "" "$method"
@@ -1735,7 +2236,10 @@ run_check_flow() {
                 install_dependencies
             fi
         fi
-        free_port 80 && port_ok=1
+        if prepare_http_validation; then
+            set_mode_args
+            port_ok=1
+        fi
     fi
 
     step "Staging test"
@@ -2039,6 +2543,24 @@ wizard_renew() {
         printf '\n'
         ask_email || return 1
     fi
+    case "$method" in
+        http_webroot)
+            HTTP_MODE="webroot"
+            MODE_PRESET=1
+            WEBROOT_DIR=$(cut -d'|' -f7 <<< "$line")
+            [ -n "$WEBROOT_DIR" ] || WEBROOT_DIR="/var/www/vessl"
+            ;;
+        http_port)
+            HTTP_MODE="httpport"
+            MODE_PRESET=1
+            ALT_PORT=$(cut -d'|' -f7 <<< "$line")
+            [ -n "$ALT_PORT" ] || ALT_PORT="8880"
+            ;;
+        tls_alpn)
+            HTTP_MODE="alpn"
+            MODE_PRESET=1
+            ;;
+    esac
     if [ "$WILDCARD" -eq 1 ]; then
         case "$method" in
             dns_manual) DNS_METHOD="manual" ;;
@@ -2414,6 +2936,10 @@ run_menu() {
         SKIP_CHECK=0
         WILDCARD=0
         DNS_METHOD=""
+        HTTP_MODE=""
+        MODE_PRESET=0
+        WEBROOT_DIR="/var/www/vessl"
+        ALT_PORT="8880"
         DOMAINS=()
         email=""
         destination=""
@@ -2469,6 +2995,18 @@ run_menu() {
     done
 }
 
+check_mode_flags() {
+    if [ "$HTTP_MODE" = "httpport" ] && { [[ ! "$ALT_PORT" =~ ^[0-9]+$ ]] || ((ALT_PORT < 1024 || ALT_PORT > 65535)); }; then
+        error "--httpport needs a port between 1024 and 65535"
+        return 1
+    fi
+    if [ "$HTTP_MODE" = "webroot" ] && ! is_custom_path "$WEBROOT_DIR"; then
+        error "--webroot needs an absolute path"
+        return 1
+    fi
+    return 0
+}
+
 cli_issue() {
     local target
     require_root
@@ -2484,6 +3022,7 @@ cli_issue() {
     WILDCARD=0
     prepare_domains "${@:1:$#-1}" || exit 1
     resolve_destination "$target" || exit 1
+    check_mode_flags || exit 1
     [ "$IS_TTY" -eq 1 ] && banner
     show_plan
     do_issue || exit 1
@@ -2549,6 +3088,7 @@ cli_check() {
     fi
     WILDCARD=0
     prepare_domains "$@" || exit 1
+    check_mode_flags || exit 1
     [ "$IS_TTY" -eq 1 ] && banner
     run_check_flow
     exit $?
@@ -2613,6 +3153,15 @@ ${bold}Options${reset}
   -y, --yes       Answer yes to every prompt
   --purge         With --uninstall: also delete certificates, acme.sh and certbot
 
+${bold}Port 80 options${reset}  (Let's Encrypt always checks port 80, these choose who answers)
+  (none)                   Port 80 free: VESSL answers. Busy: you are asked, or with -y
+                           the systemd service / Docker container on it is stopped briefly
+  --webroot [dir]          Your web server serves the challenge files from dir
+                           (default /var/www/vessl), no downtime
+  --httpport <port>        Your web server forwards /.well-known/acme-challenge/ to VESSL
+                           on this local port, no downtime
+  --alpn                   Validate on port 443 with TLS-ALPN instead (443 must be free)
+
 ${bold}Wildcard DNS options${reset}
   --cf-token <token>                 Cloudflare API token (recommended)
   --cf-key <key> --cf-email <email>  Cloudflare Global API Key
@@ -2637,6 +3186,8 @@ ${bold}Examples${reset}
   vessl --check example.com www.example.com
   vessl user@example.com example.com marzban
   vessl user@example.com example.com www.example.com /root/certs --test
+  vessl user@example.com example.com marzban --webroot /var/www/vessl
+  vessl user@example.com example.com marzban --httpport 8880
   vessl --wildcard user@example.com example.com marzban --cf-token XXXX
   CF_Token=XXXX vessl --wildcard user@example.com example.com /root/certs -y
   vessl --wildcard user@example.com example.com 3x-ui --manual
@@ -2666,6 +3217,24 @@ main() {
             --force) FORCE=1 ;;
             --verbose) CLI_VERBOSE=1 ;;
             --manual) DNS_METHOD="manual" ;;
+            --alpn)
+                HTTP_MODE="alpn"
+                MODE_PRESET=1
+                ;;
+            --webroot)
+                HTTP_MODE="webroot"
+                MODE_PRESET=1
+                [ -n "${2:-}" ] && [[ "$2" != -* ]] && {
+                    WEBROOT_DIR=$(norm_path "$2")
+                    shift
+                }
+                ;;
+            --httpport)
+                HTTP_MODE="httpport"
+                MODE_PRESET=1
+                ALT_PORT=${2:-}
+                [ $# -gt 1 ] && shift
+                ;;
             --cf-token)
                 DNS_METHOD="cf_token"
                 CF_TOKEN_IN=${2:-}
