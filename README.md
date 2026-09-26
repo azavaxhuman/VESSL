@@ -4,11 +4,15 @@
 
 **Very Easy SSL** — free Let's Encrypt certificates for your server and panels, from one friendly menu.
 
-[![Version](https://img.shields.io/badge/version-2.0.1-2ea44f)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.0.2-2ea44f)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 [![Shell](https://img.shields.io/badge/shell-bash-4EAA25)](vessl.sh)
+[![GitHub stars](https://img.shields.io/github/stars/azavaxhuman/VESSL?style=flat&logo=github&label=stars&color=f5c518)](https://github.com/azavaxhuman/VESSL/stargazers)
+[![YouTube](https://img.shields.io/badge/YouTube-Daily%20Digital%20Skills-FF0000?logo=youtube&logoColor=white)](https://www.youtube.com/@Dailydigitalskills)
 
 VESSL is a fork of [ESSL by erfjab](https://github.com/erfjab/ESSL).
+
+**⭐ If VESSL saves you time, [star this repo](https://github.com/azavaxhuman/VESSL) and [subscribe on YouTube](https://www.youtube.com/@Dailydigitalskills).**
 
 </div>
 
@@ -19,7 +23,7 @@ VESSL is a fork of [ESSL by erfjab](https://github.com/erfjab/ESSL).
   ╚██╗ ██╔╝██╔══╝  ╚════██║╚════██║██║
    ╚████╔╝ ███████╗███████║███████║███████╗
     ╚═══╝  ╚══════╝╚══════╝╚══════╝╚══════╝
-  Very Easy SSL  v2.0.1
+  Very Easy SSL  v2.0.2
   forked from ESSL by erfjab
 
   ╭─ Server ─────────────────────────────────────────────────────────────────╮
@@ -40,6 +44,9 @@ VESSL is a fork of [ESSL by erfjab](https://github.com/erfjab/ESSL).
   [10]   Uninstall VESSL             remove VESSL from this server
   [0]    Exit
 
+  ★ Star on GitHub         github.com/azavaxhuman/VESSL
+  ▶ Subscribe on YouTube   youtube.com/@Dailydigitalskills
+
   ❯ Select an option:
 ```
 
@@ -47,6 +54,7 @@ VESSL is a fork of [ESSL by erfjab](https://github.com/erfjab/ESSL).
 
 ## Contents
 
+- [Support the project](#support-the-project)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -69,6 +77,17 @@ VESSL is a fork of [ESSL by erfjab](https://github.com/erfjab/ESSL).
 - [License](#license)
 
 ---
+
+## Support the project
+
+VESSL is free and open source. Two quick things help it grow:
+
+| | | |
+|---|---|---|
+| ⭐ | **Star the repository** | [github.com/azavaxhuman/VESSL](https://github.com/azavaxhuman/VESSL). Stars help other people find VESSL |
+| ▶️ | **Subscribe on YouTube** | [Daily Digital Skills](https://www.youtube.com/@Dailydigitalskills). Video guides on VPS, VPN panels, Linux and tools like VESSL |
+
+Found a bug or have an idea? [Open an issue](https://github.com/azavaxhuman/VESSL/issues/new/choose). Pull requests are welcome too.
 
 ## Features
 
@@ -552,6 +571,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full list of changes.
 
 ## Credits
 
+- Maintained by [azavaxhuman](https://github.com/azavaxhuman), creator of the [Daily Digital Skills](https://www.youtube.com/@Dailydigitalskills) YouTube channel.
 - [ESSL](https://github.com/erfjab/ESSL) by **erfjab**, the project VESSL is forked from.
 - [acme.sh](https://github.com/acmesh-official/acme.sh) and [Certbot](https://certbot.eff.org/), which do the actual work.
 - [Let's Encrypt](https://letsencrypt.org/), for free certificates for everyone.
@@ -559,3 +579,9 @@ See [CHANGELOG.md](CHANGELOG.md) for the full list of changes.
 ## License
 
 VESSL is released under the [GNU General Public License v3.0](LICENSE).
+
+<div align="center">
+
+**If VESSL helped you, give it a ⭐ on [GitHub](https://github.com/azavaxhuman/VESSL) and [subscribe on YouTube](https://www.youtube.com/@Dailydigitalskills). Thank you!**
+
+</div>

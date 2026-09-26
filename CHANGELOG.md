@@ -2,6 +2,13 @@
 
 All notable changes to VESSL are listed here.
 
+## [2.0.2] - 2026-09-26
+
+### Added
+
+- Links to the GitHub repository and the Daily Digital Skills YouTube channel: under the menu, after a certificate is issued, in `--help`, in `--version` and after uninstalling.
+- GitHub stars and YouTube badges, and a "Support the project" section in the README.
+
 ## [2.0.1] - 2026-09-26
 
 ### Fixed

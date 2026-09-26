@@ -1,11 +1,13 @@
 #!/bin/bash
 
-VERSION="2.0.1"
+VERSION="2.0.2"
 APP_TAGLINE="Very Easy SSL"
 REPO_URL="https://github.com/azavaxhuman/VESSL"
 RAW_URL="https://raw.githubusercontent.com/azavaxhuman/VESSL/main/vessl.sh"
 UPSTREAM_NAME="ESSL by erfjab"
 UPSTREAM_URL="https://github.com/erfjab/ESSL"
+YOUTUBE_URL="https://www.youtube.com/@Dailydigitalskills"
+YOUTUBE_NAME="Daily Digital Skills"
 INSTALL_PATH="/usr/local/bin/vessl"
 CONFIG_DIR="/etc/vessl"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -90,10 +92,12 @@ setup_colors() {
         blue=$'\033[38;5;75m'
         purple=$'\033[38;5;141m'
         gray=$'\033[38;5;245m'
+        yellow=$'\033[38;5;220m'
+        ytred=$'\033[38;5;196m'
         GRAD=($'\033[38;5;51m' $'\033[38;5;45m' $'\033[38;5;39m' $'\033[38;5;33m' $'\033[38;5;63m' $'\033[38;5;99m')
     else
         IS_TTY=0
-        reset="" bold="" red="" green="" orange="" cyan="" blue="" purple="" gray=""
+        reset="" bold="" yellow="" ytred="" red="" green="" orange="" cyan="" blue="" purple="" gray=""
         GRAD=("" "" "" "" "" "")
     fi
     update_width
@@ -190,6 +194,20 @@ banner() {
     fi
     printf '  %s  %s\n' "${bold}${APP_TAGLINE}${reset}" "${gray}v${VERSION}${reset}"
     printf '  %s\n\n' "${gray}forked from ${UPSTREAM_NAME}${reset}"
+}
+
+support_box() {
+    local gh=${REPO_URL#https://} yt=${YOUTUBE_URL#https://www.}
+    box_top "Enjoying VESSL?"
+    box_row "$(col "${yellow}★${reset} ${bold}Star it on GitHub${reset}" 26)${cyan}$gh${reset}"
+    box_row "$(col "${ytred}▶${reset} ${bold}Subscribe on YouTube${reset}" 26)${cyan}$yt${reset}"
+    box_row "${gray}It is free, and it keeps new features and video guides coming.${reset}"
+    box_bottom
+}
+
+support_line() {
+    printf '  %s%s\n' "$(col "${yellow}★${reset} ${gray}Star on GitHub${reset}" 25)" "${cyan}${REPO_URL#https://}${reset}"
+    printf '  %s%s\n' "$(col "${ytred}▶${reset} ${gray}Subscribe on YouTube${reset}" 25)" "${cyan}${YOUTUBE_URL#https://www.}${reset}"
 }
 
 hide_cursor() {
@@ -1579,6 +1597,8 @@ do_issue() {
     success "Saved to the VESSL certificate list"
     steps_done "Certificate issued"
     show_result "$stopped" "http"
+    printf '\n'
+    support_box
     return 0
 }
 
@@ -1685,6 +1705,8 @@ do_issue_dns() {
     success "Saved to the VESSL certificate list"
     steps_done "Wildcard certificate issued"
     show_result "" "$method"
+    printf '\n'
+    support_box
     return 0
 }
 
@@ -2190,6 +2212,8 @@ wizard_uninstall() {
     success "VESSL has been removed"
     hint "Shared tools such as curl, socat, openssl, dig and cron were left in place."
     printf '\n  %s\n\n' "${gray}Thanks for using VESSL.${reset}"
+    support_box
+    printf '\n'
     exit 0
 }
 
@@ -2415,6 +2439,8 @@ run_menu() {
         menu_item "[10]" "Uninstall VESSL" "remove VESSL from this server"
         menu_item "[0]" "Exit" ""
         printf '\n'
+        support_line
+        printf '\n'
         read -r -p "  ${cyan}❯${reset} Select an option: " c || {
             printf '\n'
             exit 0
@@ -2436,7 +2462,7 @@ run_menu() {
             9) menu_update; pause ;;
             10) wizard_uninstall; pause ;;
             0|q|Q|exit)
-                printf '\n  %s\n\n' "${gray}Bye.${reset}"
+                printf '\n  %s\n\n' "${gray}Bye. See you on YouTube: ${YOUTUBE_URL}${reset}"
                 exit 0
                 ;;
         esac
@@ -2553,7 +2579,8 @@ cli_update() {
 show_version() {
     printf '%s\n' "${cyan}${bold}VESSL${reset} v$VERSION · $APP_TAGLINE"
     printf '%s\n' "${gray}Forked from $UPSTREAM_NAME · $UPSTREAM_URL${reset}"
-    printf '%s\n' "${gray}$REPO_URL${reset}"
+    printf '%s\n\n' "${gray}$REPO_URL${reset}"
+    support_box
 }
 
 show_help() {
@@ -2617,6 +2644,10 @@ ${bold}Examples${reset}
 
 ${bold}Install${reset}
   curl -fsSL $RAW_URL -o $INSTALL_PATH && chmod +x $INSTALL_PATH
+
+${bold}Support VESSL${reset}
+  ${yellow}★${reset} Star it on GitHub      $REPO_URL
+  ${ytred}▶${reset} Subscribe on YouTube   $YOUTUBE_URL  ($YOUTUBE_NAME)
 
 Logs: $LOG_FILE
 Must be run as root.
